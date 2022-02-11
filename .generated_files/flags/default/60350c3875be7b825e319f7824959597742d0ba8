@@ -1,0 +1,1 @@
+ $(MP_EXTRA_CC_PRE)  -g -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -I"."   -DXPRJ_default=$(CND_CONF)    $(COMPARISON_BUILD)    T:\CPE470\RDK-Basic_orig\RDK_Basic\util.c
