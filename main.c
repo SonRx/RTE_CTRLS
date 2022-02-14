@@ -118,6 +118,14 @@ volatile	struct btn	PmodSwt2;
 volatile	struct btn	PmodSwt3;
 volatile	struct btn	PmodSwt4;
 
+uint32_t IC2Counter = 0;  
+uint32_t IC3Counter = 0; 
+#define MAX 160
+uint16_t IC2Arr[MAX];
+uint16_t IC3Arr[MAX];
+
+uint16_t fullRotation = 0;
+
 /* ------------------------------------------------------------ */
 /*				Forward Declarations							*/
 /* ------------------------------------------------------------ */
@@ -128,15 +136,7 @@ void	Wait_ms(WORD ms);
 void    InitLeds( void );
 void    SetLeds( BYTE stLeds );
 
-static volatile int IC2Arr[100];
-static volatile int IC3Arr[100];
-
-
-/* ------------------------------------------------------------ */
-/*				Interrupt Service Routines						*/
-/* ------------------------------------------------------------ */
-/***	Timer5Handler
-**
+/* --------------------------------------------0
 **	Parameters:
 **		none
 **
@@ -158,10 +158,9 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
 {
 	static	WORD tusLeds = 0;
     
-    prtLed1Set = ( 1 << bnLed1 );
-    
 	mT5ClearIntFlag();
-	
+	prtLed1Set = ( 1 << bnLed1 );
+
 	// Read the raw state of the button pins.
 	btnBtn1.stCur = ( prtBtn1 & ( 1 << bnBtn1 ) ) ? stPressed : stReleased;
 	btnBtn2.stCur = ( prtBtn2 & ( 1 << bnBtn2 ) ) ? stPressed : stReleased;
@@ -277,44 +276,71 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
 }
 
 
-int IC2Counter = 0;
-uint16_t bufferData;
+
+
 void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
 {
     // clear interrupt flag for Input Capture 2
-    mT2ClearIntFlag();
- 
+    mIC2ClearIntFlag();
+    uint16_t bufferData;
     while (IC2CON & (1 << 3)){
-        bufferData = IC2BUF;
+        bufferData = (uint16_t)IC2BUF;
     }
     
-    IC2Counter++;
-    
+    if (IC2Counter <= MAX)
+        IC2Counter++;
+    else
+        IC2Counter = 0;
+
     IC2Arr[IC2Counter] = bufferData;
+    UpdateMotors();
     
-    mT2IntEnable(1); 
-    mT2GetIntEnable();  
-
-    // increment counter
+    if (IC2Counter == MAX - 1)
+        fullRotation++;
     
-
+    if (fullRotation == 3){
+        MtrCtrlStop();
+		UpdateMotors();
+    }
+    
+    //mT2IntEnable(1); 
+    //mT2GetIntEnable();   
 }
 
-int IC3Counter = 0;
+
+
 void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void)
 {
 
 // clear interrupt flag for Input Capture 3
-mT3ClearIntFlag();
-mT3IntEnable(1); 
-mT3GetIntFlag();
-mT3GetIntEnable();  
+    mIC3ClearIntFlag();
+    uint16_t bufferData;
+    
+    while (IC3CON & (1 << 3)){
+        bufferData = (uint16_t) IC3BUF;
+    }
+    
+    if (IC3Counter <= MAX)
+        IC3Counter++;
+    else
+        IC3Counter = 0;
 
-//IC3CON |= (1 << 15) && (1 << 1) && (1 << 0);
+    IC3Arr[IC3Counter] = bufferData;
+    
+    //UpdateMotors();
+    if (IC3Counter == MAX - 1)
+        fullRotation++;
+    
+    if (fullRotation == 3){
+        MtrCtrlStop();
+		UpdateMotors();
+    }
+    
+//mT3IntEnable(1); 
+//mT3GetIntFlag();
+//mT3GetIntEnable();  
+
 // increment counter
-IC3Counter++;
-
-
 
 }
 
@@ -373,8 +399,6 @@ int main(void) {
 	SpiPutBuff(szCursorOff, 4);
 	DelayMs(4);
 	SpiPutBuff("Hello from", 10);
-    //for (int i = 0; i < 20; i++)
-   //     SpiPutBuff( i , 10);
 	DelayMs(4);
 	SpiPutBuff(szCursorPos, 6);
 	DelayMs(4);
@@ -403,7 +427,7 @@ int main(void) {
 
 		INTEnableInterrupts();
 		//configure OCR to go forward
-
+/*
 		if(stPressed == stPmodBtn1){
 			//start motor if button 2 pressed
 
@@ -608,7 +632,7 @@ int main(void) {
 			MtrCtrlStop();
 			UpdateMotors();
 		}  //end if  
-
+*/
 	}  //end while
 }  //end main
 
@@ -651,10 +675,29 @@ void DeviceInit() {
 	OC3CON = ( 1 << 3 ) | ( 1 << 2 ) | ( 1 << 1 );	// pwm
 	OC3R	= dtcMtrStopped;
 	OC3RS	= dtcMtrStopped;
-
+    //////////////////////////////////////////////////////
+    // Interrupt Priority Control Register 2 // table 7-1 pic32mx
+    IPC2SET = (1 << 12) | (1 << 10); // priority 5 - sub 0
+    IFS0CLR = (1 << 9);
+    IEC0SET	= (1 << 9);
+    
+    // 15 > enable cap, 9 > capture rise first, 
+    // 7 > Timer2 counter src for cap, 1 & 0 > rising edge
+    IC2CON = (1 << 15) | (1 << 9) | (1 << 7) | (1 << 1) | (1 << 0);  
+    
+    // Interrupt Priority Control Register 3 // table 7-1 pic32mx
+    IPC3SET = (1 << 12) | (1 << 10); // priority 5 - sub 0
+    IFS0CLR = (1 << 13);
+    IEC0SET	= (1 << 13);
+    
+    // 15 > enable cap, 9 > capture rise first,
+    // 7 > Timer2 counter src for cap, 1 & 0 > rising edge
+    IC3CON = (1 << 15) | (1 << 9) | (1 << 7)  | (1 << 1) | (1 << 0);
+    
+    ////////////////////////////////////////////////////////
 	// Configure Timer 2.
 	TMR2	= 0;									// clear timer 2 count
-	PR2		= 64999;//9999;
+	PR2		= 64999; //9999
 
 	// Configure Timer 3.
 	TMR3	= 0;
@@ -675,19 +718,7 @@ void DeviceInit() {
 	
 	// Start timers.
 	T5CON = ( 1 << 15 ) | ( 1 << 5 ) | ( 1 << 4 ); // fTimer5 = fPb / 8
-    
-    // 15 > enable cap, 9 > capture rise first, 7 > Timer2 counter src for cap, 1 & 0 > rising edge
-    IC2CON |= (1 << 15) && (1 << 9) && (1 << 7) && (1 << 1) && (1 << 0);
-    IPC2SET = (1  << 20) && (1 << 19);
-    //IFS0CLR = (1 << _IFS0_T2IF_MASK);
-    //IEC0SET	= (1 << _IEC0_T2IE_POSITION);
-    
-    // 
-    IC3CON |= (1 << 15) && (1 << 9) && (1 << 1) && (1 << 0);
-    IPC3SET = (1 << 28) && (1 << 27);
-    //IFS0CLR = (1 << _IFS0_T3IF_MASK);
-    //IEC0SET	= ( 1 << _IEC0_T3IE_POSITION);
-    
+       
 	//enable SPI
 	SpiInit();
 
@@ -719,7 +750,7 @@ void DeviceInit() {
 void AppInit() {
     
     int c = 0;
-    for (; c<100; c++)
+    for (; c<MAX; c++)
     {
         IC2Arr[c] = 0;
         IC3Arr[c] = 0;
@@ -821,5 +852,14 @@ void SetLeds( BYTE stLeds ) {
 	}
 
 }
+
+//static int GetLSB(int intValue)
+//{
+//    return (intValue & 0x0000FFFF);
+//}
+//static int GetMSB(int intValue)
+//{
+//    return (intValue & 0xFFFF0000);
+//}
 
 /************************************************************************/
