@@ -293,7 +293,7 @@ void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
         IC2Counter = 0;
 
     IC2Arr[IC2Counter] = bufferData;
-    UpdateMotors();
+    //UpdateMotors();
     
     if (IC2Counter == MAX - 1)
         fullRotation++;
@@ -327,7 +327,6 @@ void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void)
 
     IC3Arr[IC3Counter] = bufferData;
     
-    //UpdateMotors();
     if (IC3Counter == MAX - 1)
         fullRotation++;
     
