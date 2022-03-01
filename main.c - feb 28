@@ -147,44 +147,45 @@ void	Wait_ms(WORD ms);
 void    InitLeds( void );
 void    SetLeds( BYTE stLeds );
 
-typedef struct PID {
+
+struct PID{
     float Kp, Ki, Kd;			// PID Constants
     uint16_t iMin, iMax;			// Integral Limits
     float Ep, Ei, Ed, error_val_old;	// Error Values
 };
+typedef struct PID pid; //wheel 
+pid leftWheel;
+pid rightWheel;
 
-struct PID pidL; // left wheel 
-struct PID pidR; // right wheel
-
-void PID_init(float kp, float ki, float kd, uint16_t iMin, uint16_t iMax){
-    PID.Kp = kp;
-    PID.Ki = ki;
-    PID.Kd = kd;
-    PID.iMin = iMin;
-    PID.iMax = iMax;
-    PID.Ep = 0; 
-    PID.Ei = 0;
-    PID.Ed = 0;
-    PID.error_val_old = 0;
+void PID_init(pid* P,float kp, float ki, float kd, uint16_t iMin, uint16_t iMax){
+    P->Kp = kp;
+    P->Ki = ki;
+    P->Kd = kd;
+    P->iMin = iMin;
+    P->iMax = iMax;
+    P->Ep = 0; 
+    P->Ei = 0;
+    P->Ed = 0;
+    P->error_val_old = 0;
 }
 
-void PID_control(PID R_or_L,uint16_t wheel,uint16_t desiredTime, uint16_t avgTime){
+void PID_control(pid* P,uint16_t wheel,uint16_t desiredTime, uint16_t avgTime){
     float output;
     float error_val_n = (float)avgTime - (float)desiredTime; // using time needed to subtract desired from measured
     
-    PID.Ep = error_val_n * PID.Kp; // Error Proportional
-    PID.Ei += error_val_n * PID.Ki; // Error Integration
-    PID.Ed = (error_val_n - PID.error_val_old) * PID.Kd; // Error differential
+    P->Ep = error_val_n * P->Kp; // Error Proportional
+    P->Ei += error_val_n * P->Ki; // Error Integration
+    P->Ed = (error_val_n - P->error_val_old) * P->Kd; // Error differential
 
-    if (PID.Ei > PID.iMax){         // Max
-        PID.Ei = PID.iMax;
+    if (P->Ei > P->iMax){         // Max
+        P->Ei = P->iMax;
     }
-    else if (PID.Ei < PID.iMin){    // Min
-        PID.Ei = PID.iMin;
+    else if (P->Ei < P->iMin){    // Min
+        P->Ei = P->iMin;
     }
     
-    output = PID.Ep + PID.Ei + PID.Ed; // float
-    PID.error_val_old = error_val_n;  // update old value for next iteration
+    output = P->Ep + P->Ei + P->Ed; // float
+    P->error_val_old = error_val_n;  // update old value for next iteration
     if (wheel == 0){ // left wheel?
         if (output > 10000){
            OC2R = 10000;
@@ -324,8 +325,8 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
        // setpoint -> desired pulse time ; input -> avg pulse time from input cap.
        // void PID_error(uint16_t wheel,uint16_t SetPoint, uint16_t input) // 0 for left wheel; 1 for right wheel;
 
-       PID_control(pidL,0,LW_time,LW_avg_meas);
-       PID_control(pidR,1,RW_time,RW_avg_meas);
+      PID_control(&leftWheel,0,LW_time,LW_avg_meas);
+      PID_control(&rightWheel,1,RW_time,RW_avg_meas);
 
     }
     if (TMR5_Counter++ > cntr_ms_interval){
@@ -567,8 +568,9 @@ int main(void) {
 	DeviceInit();
 	AppInit();
     InitLeds(); // checkpoint
-    //       kp,ki,kd   , iMin,iMax
-    PID_init(1,0.75,0.075,1500,10000);
+    //       wheel        kp,ki,kd   , iMin,iMax
+    PID_init(&leftWheel,1,0.75,0.075,1500,10000);
+    PID_init(&rightWheel,1,0.75,0.075,1500,10000);
     
 	INTDisableInterrupts();
 	DelayMs(500);
