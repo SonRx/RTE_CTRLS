@@ -33,6 +33,8 @@
 #include "MtrCtrl.h"
 #include "spi.h"
 #include "util.h"
+#include <math.h>
+#include "pid.h"
 
 /* ------------------------------------------------------------ */
 /*				Local Type Definitions							*/
@@ -78,7 +80,6 @@
 
 #define	stPressed	1
 #define	stReleased	0
-
 #define	cstMaxCnt	10 // number of consecutive reads required for
 					   // the state of a button to be updated
 
@@ -120,21 +121,101 @@ volatile	struct btn	PmodSwt4;
 
 uint32_t IC2Counter = 0;  
 uint32_t IC3Counter = 0; 
-#define MAX 160
+
+#define MAX 156
+uint16_t cntr_ms_interval = 19; // 20 ms interval
+
 uint16_t IC2Arr[MAX];
 uint16_t IC3Arr[MAX];
+uint16_t diffCapArr[MAX];
+uint16_t diffCapArr2[MAX];
 
 uint16_t fullRotation = 0;
+
+
+uint16_t RW_time = 6000;    //desired right wheel pulse time (us)
+uint16_t LW_time = 6000;    //desired left wheel pulse time (us)
+
+float RW_speed; //= 0.00480769231/(RW_time * 0.000001);
+float LW_speed; //= 0.00480769231/(LW_time * 0.000001);
+    
+float lwSpeed;
+float rwSpeed;
+
+float alpha = 0.5; // IIR filter coefficient
+
+float ADCValue0 = 0; // in ADC handler
+float ADCValue1 = 0;
+float ADCValue2 = 0;
+
+int offsetLeft = 0;
+int offsetRight = 0;
+int sit2 = 0;
+int sit3 = 0;
+int sit4 = 0;
 
 /* ------------------------------------------------------------ */
 /*				Forward Declarations							*/
 /* ------------------------------------------------------------ */
 
 void	DeviceInit(void);
+void    PID_init(pid* P, float kp, float ki, float kd); // two objects created in pid.h
+void    PID_control(pid* P,uint16_t wheel,uint16_t desiredTime, uint16_t avgTime);
 void	AppInit(void);
+void    AdcInit(void);
 void	Wait_ms(WORD ms);
 void    InitLeds( void );
 void    SetLeds( BYTE stLeds );
+
+void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
+{
+    prtLed4Set = ( 1 << bnLed4 );
+    //mAD1ClearIntFlag(); // eq. to IFS1CLR = 2;
+    IFS1CLR = ( 1 << 1 );
+    
+    ADCValue0 = (float)ADC1BUF0*3.3/1023.0; // Reading AN0(zero), pin 1 of connector JJ -- servo sensor (center)
+    ADCValue1 = (float)ADC1BUF1*3.3/1023.0;
+    ADCValue2 = (float)ADC1BUF2*3.3/1023.0;
+    
+    if(ADCValue2 < 0.5 && ADCValue0 < 0.4){
+       LW_avg_meas = LW_time - 3000;
+       RW_avg_meas = RW_time - 1500;
+    }
+    else if (ADCValue0 > 2.60 && ADCValue2 > 1.30){ // avoids hitting the left wall directly, take semi-hard right.
+        LW_avg_meas = LW_avg_meas + 2000;
+        RW_avg_meas = RW_avg_meas - 750;
+    }
+    else if(ADCValue0 > 2.15 && ADCValue2 > 2.15){
+      RW_avg_meas = RW_avg_meas + 1000;
+      sit2 += 1;
+      sit4 = 0;
+    }
+    else if (ADCValue2 > 1.1 && ADCValue2 <= 2.15) { // sweet spot 
+       LW_avg_meas = LW_avg_meas + 250;   // decrease speed of left -> moves closer to left wall
+       offsetLeft += 1;
+        if (offsetLeft >= 50){
+            LW_avg_meas = LW_avg_meas - 250;   // increases speed of left -> moves to the right
+            offsetLeft = 0;
+            offsetRight += 1;
+            if (offsetRight >= 50){
+                LW_avg_meas = RW_avg_meas;
+            }
+        }
+    }
+    else if(ADCValue2 < 1.1 && ADCValue0 < 1.1){ // allows the bot to steady creep up to the left wall
+        LW_avg_meas = LW_time - 500; // slower
+        RW_avg_meas = RW_time - 250; // slowed but faster than left
+        sit4 += 1;
+        if (sit4 >= 125){
+            LW_avg_meas = LW_time;
+            RW_avg_meas = RW_time;
+            DelayMs(200);
+            sit4 = 0;
+        }
+    }
+     
+    prtLed4Clr	= ( 1 << bnLed4 );
+}
 
 /* --------------------------------------------0
 **	Parameters:
@@ -153,13 +234,28 @@ void    SetLeds( BYTE stLeds );
 **		the on-board LEDs and the Pmod8LD LEDs at a regular interval.
 */
 
-
 void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
 {
 	static	WORD tusLeds = 0;
+    static  HWORD TMR5_Counter = 0;
     
 	mT5ClearIntFlag();
 	prtLed1Set = ( 1 << bnLed1 );
+   
+    // 
+    if (TMR5_Counter == cntr_ms_interval){
+       // do pid cntrl
+       // setpoint -> desired pulse time ; input -> avg pulse time from input cap.
+       // void PID_error(uint16_t wheel,uint16_t SetPoint, uint16_t input) // 0 for left wheel; 1 for right wheel;
+
+     
+      PID_control(&leftWheel,0,LW_time,LW_avg_meas);
+      PID_control(&rightWheel,1,RW_time,RW_avg_meas);
+    }
+    
+    if (TMR5_Counter++ > cntr_ms_interval){
+        TMR5_Counter = 0;
+    }
 
 	// Read the raw state of the button pins.
 	btnBtn1.stCur = ( prtBtn1 & ( 1 << bnBtn1 ) ) ? stPressed : stReleased;
@@ -275,72 +371,111 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
     prtLed1Clr	= ( 1 << bnLed1 );
 }
 
-
-
-
 void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
 {
     // clear interrupt flag for Input Capture 2
     mIC2ClearIntFlag();
     uint16_t bufferData;
-    while (IC2CON & (1 << 3)){
+    uint16_t diffCapTime;
+    prtLed2Set = ( 1 << bnLed2 );
+    
+    while (IC2CON & (1 << 3))
         bufferData = (uint16_t)IC2BUF;
-    }
     
-    if (IC2Counter <= MAX)
+    if (IC2Counter < MAX-1)
         IC2Counter++;
-    else
+    else{
         IC2Counter = 0;
-
-    IC2Arr[IC2Counter] = bufferData;
-    //UpdateMotors();
-    
-    if (IC2Counter == MAX - 1)
-        fullRotation++;
-    
-    if (fullRotation == 3){
-        MtrCtrlStop();
-		UpdateMotors();
+        //fullRotation++;
     }
     
-    //mT2IntEnable(1); 
-    //mT2GetIntEnable();   
+    // store bufferData into an array
+    IC2Arr[IC2Counter] = bufferData;
+    
+    // upon start of algo, take first element and subtract with last element
+    if (IC2Counter == 0)
+        diffCapTime = IC2Arr[0] - IC2Arr[MAX - 1];
+    else
+        diffCapTime = IC2Arr[IC2Counter] - IC2Arr[IC2Counter - 1];
+    
+    // if time is negative, add max to offset
+    if (diffCapTime < 0)
+        diffCapTime += 65000;  
+    
+    // store diffCapTime into an array
+    diffCapArr[IC2Counter] = diffCapTime;
+    
+    // IIR Filter 
+    if (diffCapTime > 2000 && diffCapTime < 20000)
+        RW_avg_meas = RW_avg_meas * alpha + (float)diffCapTime*(1-alpha);
+    else{
+        RW_avg_meas = RW_avg_meas;  //essentially, dont update filter 
+    }
+    
+     float secs = RW_avg_meas * 0.000001;
+    // X pulse * 1 rev / 156 pulse * 0.75 ft / 1 rev = 0.00480769231*X ft
+    // speed = dist/time => ft/s
+    rwSpeed = 0.00480769231/secs;
+    
+/*    if (fullRotation >= 10){  // 157 rev
+		OC2R = 0;
+        OC2RS = 0;
+    } */
+    
+    prtLed2Clr	= ( 1 << bnLed2 );
 }
 
-
-
-void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void)
+void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void) 
 {
-
 // clear interrupt flag for Input Capture 3
     mIC3ClearIntFlag();
     uint16_t bufferData;
+    uint16_t diffCapTime;
+    prtLed3Set = ( 1 << bnLed3 );
     
-    while (IC3CON & (1 << 3)){
-        bufferData = (uint16_t) IC3BUF;
-    }
+    while (IC3CON & (1 << 3))
+        bufferData = (uint16_t) IC3BUF; 
     
-    if (IC3Counter <= MAX)
+    if (IC3Counter < MAX-1) // 155
         IC3Counter++;
-    else
+    else{
         IC3Counter = 0;
+        //fullRotation++;
+    }
 
+    // store bufferData into an array
     IC3Arr[IC3Counter] = bufferData;
     
-    if (IC3Counter == MAX - 1)
-        fullRotation++;
+    // upon start of algo, take first element and subtract with last element
+    if (IC3Counter == 0)
+        diffCapTime = IC3Arr[0] - IC3Arr[MAX - 1];
+    else
+        diffCapTime = IC3Arr[IC3Counter] - IC3Arr[IC3Counter - 1];
     
-    if (fullRotation == 3){
-        MtrCtrlStop();
-		UpdateMotors();
+    // if time is negative, add max to offset
+    if (diffCapTime < 0)
+        diffCapTime += 65000;        
+
+    // store diffCapTime into an array
+    diffCapArr2[IC3Counter] = diffCapTime;   
+    
+    // IIR Filter 
+    if (diffCapTime > 2000 && diffCapTime < 20000){
+        LW_avg_meas = LW_avg_meas * alpha + (float)diffCapTime*(1-alpha);
     }
+    else{
+        LW_avg_meas = LW_avg_meas;  //essentially, don't update filter 
+    }
+    float secs = LW_avg_meas * 0.000001;
+    // X pulse * 1 rev / 156 pulse * 0.75 ft / 1 rev = 0.00480769231*X ft
+    // speed = dist/time => ft/s
+    lwSpeed = 0.00480769231/secs;
+/*    if (fullRotation == 10){ // 157 rev
+        OC3R = 0;
+        OC3RS = 0;
+    } */
     
-//mT3IntEnable(1); 
-//mT3GetIntFlag();
-//mT3GetIntEnable();  
-
-// increment counter
-
+    prtLed3Clr	= ( 1 << bnLed3 );
 }
 
 /* ------------------------------------------------------------ */
@@ -383,32 +518,79 @@ int main(void) {
     
 	DeviceInit();
 	AppInit();
+    AdcInit();
     InitLeds(); // checkpoint
+        
+    //       wheel        kp, ki, kd   , iMin,iMax
+    PID_init(&leftWheel,  1, 0.75,0.075);//,0,10000); // 0.75 0.075
     
-	INTDisableInterrupts();
+    PID_init(&rightWheel, 1, 0.75,0.075);//,0,10000);
+    
+    
+	//INTDisableInterrupts();
 	DelayMs(500);
 	
 
 	//write to PmodCLS
-	SpiEnable();
-	SpiPutBuff(szClearScreen, 3);
-	DelayMs(4);
-	SpiPutBuff(szBacklightOn, 4);
-	DelayMs(4);
-	SpiPutBuff(szCursorOff, 4);
-	DelayMs(4);
-	SpiPutBuff("Hello from", 10);
-	DelayMs(4);
-	SpiPutBuff(szCursorPos, 6);
-	DelayMs(4);
-	SpiPutBuff("Digilent!", 9);
-	DelayMs(2000);
-	SpiDisable();
+//	SpiEnable();
+//	SpiPutBuff(szClearScreen, 3);
+//	DelayMs(4);
+//	SpiPutBuff(szBacklightOn, 4);
+//	DelayMs(4);
+//	SpiPutBuff(szCursorOff, 4);
+//	DelayMs(4);
+//	SpiPutBuff("Hello from", 10);
+//	DelayMs(4);
+//	SpiPutBuff(szCursorPos, 6);
+//	DelayMs(4);
+//	SpiPutBuff("Digilent!", 9);
+//	DelayMs(2000);
+//	SpiDisable();
     
 	INTEnableInterrupts();
+    char strout[100];
+    char strout2[100];
+    char ADC0out[100];
+    char ADC2out[100];
+   
+    OC2R = 5000; // right wheel
+    OC2RS = 5000;
+    OC3R = 5000; // left wheel
+    OC3RS = 5000;
+    
 	while (fTrue)
-	{		
-		INTDisableInterrupts();
+	{	
+        RW_speed = 0.00480769231/(RW_time * 0.000001);
+        LW_speed = 0.00480769231/(LW_time * 0.000001);
+		//INTDisableInterrupts();
+       
+        SpiEnable();
+        SpiPutBuff(szClearScreen, 3);
+        DelayMs(4);
+        SpiPutBuff(szBacklightOn, 4);
+        DelayMs(4);
+        SpiPutBuff(szCursorOff, 4);
+        DelayMs(4);
+//        sprintf(strout, "spd=%.1f ft/s", speed);
+//        SpiPutBuff(strout, strlen(strout));
+        
+//        sprintf(strout2, "D=%.3f C=%.3f", RW_speed, rwSpeed);//, RW_avg_meas); Cur=%.1f"
+//        SpiPutBuff(strout2, strlen(strout2));
+        
+        sprintf(ADC0out, "A0=%.2f R=%.2f", ADCValue0, rwSpeed);
+        //sprintf(ADC0out, "A0=%.2f", ADCValue0);
+        SpiPutBuff(ADC0out, strlen(ADC0out));
+        DelayMs(4);
+        SpiPutBuff(szCursorPos, 6);
+        DelayMs(4);
+        sprintf(ADC2out, "A2=%.2f L=%.2f",ADCValue2, lwSpeed);
+        //sprintf(ADC2out, "A2=%.2f",ADCValue2);
+
+        SpiPutBuff(ADC2out, strlen(ADC2out));
+        //sprintf(strout, "d=%.3f c=%.3f", LW_speed, lwSpeed);//, RW_avg_meas); Cur=%.1f"
+        //SpiPutBuff(strout, strlen(strout));
+        DelayMs(250);
+        SpiDisable();
 	
 		//get data here
 		stBtn1 = btnBtn1.stBtn;
@@ -438,7 +620,7 @@ int main(void) {
 			Wait_ms(0x0800);
 			MtrCtrlStop();
 			UpdateMotors();
-			
+		
 		}else if(stPressed == stPmodBtn2){
 			//start left turn
 
@@ -666,12 +848,12 @@ void DeviceInit() {
 	prtMtrRightDirSet	= ( 1 << bnMtrRightDir );	// forward
 
 	// Configure Output Compare 2 to drive the left motor.
-	OC2CON	= ( 1 << 2 ) | ( 1 << 1 );	// pwm set up
+	OC2CON	= (1 << 3) | ( 1 << 2 ) | ( 1 << 1 );	// pwm set up, Using timer 3
 	OC2R	= dtcMtrStopped;
 	OC2RS	= dtcMtrStopped;
 
 	// Configure Output Compare 3.
-	OC3CON = ( 1 << 3 ) | ( 1 << 2 ) | ( 1 << 1 );	// pwm
+	OC3CON = ( 1 << 3 ) | ( 1 << 2 ) | ( 1 << 1 );	// pwm, Using timer 3
 	OC3R	= dtcMtrStopped;
 	OC3RS	= dtcMtrStopped;
     //////////////////////////////////////////////////////
@@ -696,21 +878,21 @@ void DeviceInit() {
     ////////////////////////////////////////////////////////
 	// Configure Timer 2.
 	TMR2	= 0;									// clear timer 2 count
-	PR2		= 64999; //9999
+	PR2		= 64999; // used for input cap
 
 	// Configure Timer 3.
 	TMR3	= 0;
-	PR3		= 9999;
+	PR3		= 9999; // used for output compare
 
 	// Start timers and output compare units.
-	T2CON		= ( 1 << 15 ) | ( 1 << TCKPS20 )|(1 << TCKPS21);		// timer 2 prescale = 8
+	T2CON		= ( 1 << 15 ) | (1 << TCKPS21) | ( 1 << TCKPS20 );	// timer 2 prescale = 8 , 4 5 6
 	OC2CONSET	= ( 1 << 15 );	// enable output compare module 2
 	OC3CONSET	= ( 1 << 15 );	// enable output compare module 3
 	T3CON		= ( 1 << 15 ) | ( 1 << TCKPS31 ) | ( 1 << TCKPS30); 	// timer 3 prescale = 8
 
 	// Configure Timer 5.
 	TMR5	= 0;
-	PR5		= 99; // period match every 100 us
+	PR5		= 999; // period match every 1000 us , was 99 -> 100 us // 9999-> 10ms
 	IPC5SET	= ( 1 << 4 ) | ( 1 << 3 ) | ( 1 << 2 ) | ( 1 << 1 ) | ( 1 << 0 ); // interrupt priority level 7, sub 3
 	IFS0CLR = ( 1 << 20 );
 	IEC0SET	= ( 1 << 20 );
@@ -723,6 +905,7 @@ void DeviceInit() {
 
 	// Enable multi-vector interrupts.
 	INTEnableSystemMultiVectoredInt();
+    //
 }
 
 /* ------------------------------------------------------------ */
@@ -745,18 +928,41 @@ void DeviceInit() {
 **		and global variables for application.
 */
 
-
-void AppInit() {
-    
+void AppInit() {  
     int c = 0;
     for (; c<MAX; c++)
     {
         IC2Arr[c] = 0;
         IC3Arr[c] = 0;
+        diffCapArr[c] = 0;
+        diffCapArr2[c] = 0;
     }
-
 }
 
+void    AdcInit(void){
+//	CONFIGURE ADC
+	AD1PCFG	= 0XFFF8;
+	// CONFIGURE AN0, AN1, and AN2 AS ANALOG INPUTS
+	AD1CON1	= 0X00E4;   
+	// BIT 7-5 SSRC 111 = INTERNAL COUNTER ENDS SAMPLING AND STARTS CONVERSION
+	// BIT 4 CLRASM 0 = Normal Operation, buffer contents will be overwritten by the next conversion sequence
+	// BIT 2 ASAM 1 = SAMPLING BEGINS immediately after conversion completes; SAMP bit is automatically set
+	// BIT 1 SAMP 0 = ADC IS NOT SAMPLING
+	// BUT 0 DONE 0 = STATUS BIT
+	AD1CON2	= 0X0408; // 0000 0100 0000 1000     				
+	// BIT 10 CSCNA 1 = SCAN INPUTS
+	// BIT 2-3 SMPL 1-1 = ONE INTERRUPT AFTER EVERY THIRD CONVERSION
+	AD1CON3	= 0X1FFF;
+	// BIT 15 ADRC 0 = CLOCK DERIVED FROM PERIPHERAL BUS CLOCK
+	// SAMC AND ADCS - I NEED TO READ MORE ABOUT TIMING TO UNDERSTAND THE FUNCTION OF THESE TWO VARIABLES
+	AD1CHS	= 0X00000000;   // 32 bit SFR  
+	AD1CSSL	= 0X0007;  
+	// CSSL = SCAN CHANNELS 2,1 and 0
+	IPC6SET	= ( 1 << 27 ) | ( 1 << 26 ); // ADC interrupt priority level 3, sub 0
+	IFS1CLR	= 2;    // CLEAR ADC INTERRUPT FLAG
+	IEC1SET = 2;	// ENABLE ADC INTERRUPT
+	AD1CON1SET = 0X8000;	// 	TURN ADC ON
+}
 
 /* ------------------------------------------------------------ */
 /***	Wait_ms
