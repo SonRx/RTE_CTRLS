@@ -223,7 +223,7 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
             }
         }
     }
-    
+     // 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
     else if (mode == 1){ 
         if (ADCValue0 >= 1.00){ // stop if it senses an object in front
             MtrCtrlStop();  //stop before sending new data to avoid possible short circuit

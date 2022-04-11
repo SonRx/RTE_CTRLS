@@ -44,6 +44,9 @@
 #define	dtcMtrStopped	0
 */
 
+// 16 february 2022
+#define dtcMtrTenPerent     1000
+
 #define	dtcMtrSlow		2500
 #define	dtcMtrMedium	4000
 #define	dtcMtrFast		8000
