@@ -154,6 +154,7 @@ int sit2 = 0;
 int sit3 = 0;
 int sit4 = 0;
 
+uint8_t mode = 0;
 /* ------------------------------------------------------------ */
 /*				Forward Declarations							*/
 /* ------------------------------------------------------------ */
@@ -167,6 +168,8 @@ void	Wait_ms(WORD ms);
 void    InitLeds( void );
 void    SetLeds( BYTE stLeds );
 
+
+
 void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
 {
     prtLed4Set = ( 1 << bnLed4 );
@@ -177,41 +180,73 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
     ADCValue1 = (float)ADC1BUF1*3.3/1023.0;
     ADCValue2 = (float)ADC1BUF2*3.3/1023.0;
     
-    if(ADCValue2 < 0.5 && ADCValue0 < 0.4){
-       LW_avg_meas = LW_time - 3000;
-       RW_avg_meas = RW_time - 1500;
-    }
-    else if (ADCValue0 > 2.60 && ADCValue2 > 1.30){ // avoids hitting the left wall directly, take semi-hard right.
-        LW_avg_meas = LW_avg_meas + 2000;
-        RW_avg_meas = RW_avg_meas - 750;
-    }
-    else if(ADCValue0 > 2.15 && ADCValue2 > 2.15){
-      RW_avg_meas = RW_avg_meas + 1000;
-      sit2 += 1;
-      sit4 = 0;
-    }
-    else if (ADCValue2 > 1.1 && ADCValue2 <= 2.15) { // sweet spot 
-       LW_avg_meas = LW_avg_meas + 250;   // decrease speed of left -> moves closer to left wall
-       offsetLeft += 1;
-        if (offsetLeft >= 50){
-            LW_avg_meas = LW_avg_meas - 250;   // increases speed of left -> moves to the right
-            offsetLeft = 0;
-            offsetRight += 1;
-            if (offsetRight >= 50){
-                LW_avg_meas = RW_avg_meas;
+    if (mode == 0) {
+        
+        // rest motors to go forward after transition from mode 1(puppy dog).
+        dirMtrLeft	= dirMtrLeftBwd;
+		dirMtrRight	= dirMtrRightBwd;
+        
+        if(ADCValue2 < 0.5 && ADCValue1 < 0.4){ // go north-west bound
+           LW_avg_meas = LW_time - 3000;
+           RW_avg_meas = RW_time - 1500;
+        }
+        else if (ADCValue1 > 2.60 && ADCValue2 > 1.30){ // avoids hitting the left wall directly, take semi-hard right.
+            LW_avg_meas = LW_avg_meas + 2000;
+            RW_avg_meas = RW_avg_meas - 750;
+        }
+        else if(ADCValue1 > 2.15 && ADCValue2 > 2.15){
+          RW_avg_meas = RW_avg_meas + 1000;
+          sit2 += 1;
+          sit4 = 0;
+        }
+        else if (ADCValue2 > 1.1 && ADCValue2 <= 2.15) { // sweet spot 
+           LW_avg_meas = LW_avg_meas + 250;   // decrease speed of left -> moves closer to left wall
+           offsetLeft += 1;
+            if (offsetLeft >= 50){
+                LW_avg_meas = LW_avg_meas - 250;   // increases speed of left -> moves to the right
+                offsetLeft = 0;
+                offsetRight += 1;
+                if (offsetRight >= 50){
+                    LW_avg_meas = RW_avg_meas;
+                }
+            }
+        }
+        else if(ADCValue2 < 1.1 && ADCValue1 < 1.1){ // allows the bot to steady creep up to the left wall
+            LW_avg_meas = LW_time - 500; // slower
+            RW_avg_meas = RW_time - 250; // slowed but faster than left
+            sit4 += 1;
+            if (sit4 >= 125){
+                LW_avg_meas = LW_time;
+                RW_avg_meas = RW_time;
+                DelayMs(200);
+                sit4 = 0;
             }
         }
     }
-    else if(ADCValue2 < 1.1 && ADCValue0 < 1.1){ // allows the bot to steady creep up to the left wall
-        LW_avg_meas = LW_time - 500; // slower
-        RW_avg_meas = RW_time - 250; // slowed but faster than left
-        sit4 += 1;
-        if (sit4 >= 125){
-            LW_avg_meas = LW_time;
-            RW_avg_meas = RW_time;
-            DelayMs(200);
-            sit4 = 0;
+    
+    else if (mode == 1){ 
+        if (ADCValue0 >= 1.00){ // stop if it senses an object in front
+            MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
+			UpdateMotors(); 
+			DelayMs(50);
+			MtrCtrlFwdRight();
+			UpdateMotors();
+			DelayMs(50);
+			MtrCtrlStop();
+			UpdateMotors();
         }
+        else if (ADCValue0 < 0.65){ // move forward
+            MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
+			UpdateMotors(); 
+			DelayMs(50);
+			MtrCtrlBwdRight();
+			UpdateMotors();
+			DelayMs(50);
+			MtrCtrlStop();
+			UpdateMotors();
+        }
+        else
+            UpdateMotors(); 
     }
      
     prtLed4Clr	= ( 1 << bnLed4 );
@@ -248,7 +283,6 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
        // setpoint -> desired pulse time ; input -> avg pulse time from input cap.
        // void PID_error(uint16_t wheel,uint16_t SetPoint, uint16_t input) // 0 for left wheel; 1 for right wheel;
 
-     
       PID_control(&leftWheel,0,LW_time,LW_avg_meas);
       PID_control(&rightWheel,1,RW_time,RW_avg_meas);
     }
@@ -551,6 +585,7 @@ int main(void) {
     char strout[100];
     char strout2[100];
     char ADC0out[100];
+    char ADC1out [100];
     char ADC2out[100];
    
     OC2R = 5000; // right wheel
@@ -577,15 +612,14 @@ int main(void) {
 //        sprintf(strout2, "D=%.3f C=%.3f", RW_speed, rwSpeed);//, RW_avg_meas); Cur=%.1f"
 //        SpiPutBuff(strout2, strlen(strout2));
         
-        sprintf(ADC0out, "A0=%.2f R=%.2f", ADCValue0, rwSpeed);
+        sprintf(ADC0out, "0=%.2f 1=%.2f", ADCValue0, ADCValue1);
         //sprintf(ADC0out, "A0=%.2f", ADCValue0);
         SpiPutBuff(ADC0out, strlen(ADC0out));
         DelayMs(4);
         SpiPutBuff(szCursorPos, 6);
         DelayMs(4);
-        sprintf(ADC2out, "A2=%.2f L=%.2f",ADCValue2, lwSpeed);
+        sprintf(ADC2out,"2=%i :%.1f %.1f",mode, lwSpeed, rwSpeed);
         //sprintf(ADC2out, "A2=%.2f",ADCValue2);
-
         SpiPutBuff(ADC2out, strlen(ADC2out));
         //sprintf(strout, "d=%.3f c=%.3f", LW_speed, lwSpeed);//, RW_avg_meas); Cur=%.1f"
         //SpiPutBuff(strout, strlen(strout));
@@ -608,7 +642,16 @@ int main(void) {
 
 		INTEnableInterrupts();
 		//configure OCR to go forward
-/*
+        
+        if (stBtn1 == stPressed){
+            if (mode == 0)
+                mode = 1;
+                // run wall following mode
+            else if (mode == 1)
+                mode = 0;
+                // run puppy dog mode
+        }
+/*      
 		if(stPressed == stPmodBtn1){
 			//start motor if button 2 pressed
 
