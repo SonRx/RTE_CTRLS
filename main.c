@@ -180,6 +180,7 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
     ADCValue1 = (float)ADC1BUF1*3.3/1023.0;
     ADCValue2 = (float)ADC1BUF2*3.3/1023.0;
     
+    // wall following mode
     if (mode == 0) {
         
         // rest motors to go forward after transition from mode 1(puppy dog).
@@ -223,9 +224,9 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
             }
         }
     }
-     // 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
-    else if (mode == 1){ 
-        if (ADCValue0 >= 1.00){ // stop if it senses an object in front
+     // puppy dog mode
+    else if (mode == 1){      
+        if (ADCValue0 >= 0.75){ // Move backwards
             MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
 			UpdateMotors(); 
 			DelayMs(50);
@@ -234,10 +235,11 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
 			DelayMs(50);
 			MtrCtrlStop();
 			UpdateMotors();
+            DelayMs(50);
         }
-        else if (ADCValue0 < 0.65){ // move forward
+        else if (ADCValue0 < 0.45){ // Move forward
             MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
-			UpdateMotors(); 
+			UpdateMotors();  
 			DelayMs(50);
 			MtrCtrlBwdRight();
 			UpdateMotors();
@@ -245,8 +247,10 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
 			MtrCtrlStop();
 			UpdateMotors();
         }
-        else
-            UpdateMotors(); 
+        else{
+           //MtrCtrlStop();
+           UpdateMotors(); 
+        }
     }
      
     prtLed4Clr	= ( 1 << bnLed4 );
@@ -644,12 +648,10 @@ int main(void) {
 		//configure OCR to go forward
         
         if (stBtn1 == stPressed){
-            if (mode == 0)
+            if (mode == 0) // run wall following mode
                 mode = 1;
-                // run wall following mode
-            else if (mode == 1)
+            else if (mode == 1)   // run puppy dog mode
                 mode = 0;
-                // run puppy dog mode
         }
 /*      
 		if(stPressed == stPmodBtn1){
