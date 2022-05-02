@@ -83,6 +83,11 @@
 #define	cstMaxCnt	10 // number of consecutive reads required for
 					   // the state of a button to be updated
 
+// bluetooth
+//4/27/22
+#define BaudRate 9600
+#define PBCLK 8000000
+
 struct btn {
 	BYTE	stBtn;	// status of the button (pressed or released)
 	BYTE	stCur;  // current read state of the button
@@ -155,10 +160,15 @@ int sit3 = 0;
 int sit4 = 0;
 
 uint8_t mode = 0;
+
+char funtime = 's';
+// oa od
+//////////////
 /* ------------------------------------------------------------ */
 /*				Forward Declarations							*/
 /* ------------------------------------------------------------ */
 
+void    BluetoothInit(void);
 void	DeviceInit(void);
 void    PID_init(pid* P, float kp, float ki, float kd); // two objects created in pid.h
 void    PID_control(pid* P,uint16_t wheel,uint16_t desiredTime, uint16_t avgTime);
@@ -168,11 +178,21 @@ void	Wait_ms(WORD ms);
 void    InitLeds( void );
 void    SetLeds( BYTE stLeds );
 
-
+void __ISR(_UART_2_VECTOR, ipl4) _UART2_HANDLER(void)
+{
+    mU2RXClearIntFlag(); // equivalent to IFS1CLR = (1 << 9) clears RX8
+    
+    prtLed1Set = ( 1 << bnLed1 );
+        
+    if (U2RXREG != 0x0A && U2RXREG != 0x0D)
+        funtime = U2RXREG; 
+    
+    prtLed1Clr	= ( 1 << bnLed1 );
+}
 
 void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
 {
-    prtLed4Set = ( 1 << bnLed4 );
+    //prtLed4Set = ( 1 << bnLed4 );
     //mAD1ClearIntFlag(); // eq. to IFS1CLR = 2;
     IFS1CLR = ( 1 << 1 );
     
@@ -253,7 +273,7 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
         }
     }
      
-    prtLed4Clr	= ( 1 << bnLed4 );
+    //prtLed4Clr	= ( 1 << bnLed4 );
 }
 
 /* --------------------------------------------0
@@ -279,7 +299,7 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
     static  HWORD TMR5_Counter = 0;
     
 	mT5ClearIntFlag();
-	prtLed1Set = ( 1 << bnLed1 );
+	//prtLed1Set = ( 1 << bnLed1 );
    
     // 
     if (TMR5_Counter == cntr_ms_interval){
@@ -294,6 +314,7 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
     if (TMR5_Counter++ > cntr_ms_interval){
         TMR5_Counter = 0;
     }
+    
 
 	// Read the raw state of the button pins.
 	btnBtn1.stCur = ( prtBtn1 & ( 1 << bnBtn1 ) ) ? stPressed : stReleased;
@@ -406,7 +427,38 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
 		PmodSwt4.stBtn = PmodSwt4.stCur;
 		PmodSwt4.cst = 0;
 	}
-    prtLed1Clr	= ( 1 << bnLed1 );
+    //prtLed1Clr	= ( 1 << bnLed1 );
+   
+    // funtime already initialized
+    
+    switch (funtime){
+        case 'I' :
+            printf("Moving Forward\n" );
+            MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
+			UpdateMotors();  
+			DelayMs(50);
+			MtrCtrlBwdRight();
+			UpdateMotors();
+			DelayMs(50);
+			MtrCtrlStop();
+			UpdateMotors();
+            break;
+        case 'K' :
+            printf("Moving Backwards\n" );
+            MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
+			UpdateMotors(); 
+			DelayMs(50);
+			MtrCtrlFwdRight();
+			UpdateMotors();
+			DelayMs(50);
+			MtrCtrlStop();
+			UpdateMotors();
+            break;
+        default :
+            MtrCtrlStop();
+            UpdateMotors();
+    }
+    
 }
 
 void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
@@ -415,7 +467,7 @@ void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
     mIC2ClearIntFlag();
     uint16_t bufferData;
     uint16_t diffCapTime;
-    prtLed2Set = ( 1 << bnLed2 );
+   // prtLed2Set = ( 1 << bnLed2 );
     
     while (IC2CON & (1 << 3))
         bufferData = (uint16_t)IC2BUF;
@@ -460,7 +512,7 @@ void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
         OC2RS = 0;
     } */
     
-    prtLed2Clr	= ( 1 << bnLed2 );
+   // prtLed2Clr	= ( 1 << bnLed2 );
 }
 
 void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void) 
@@ -469,7 +521,7 @@ void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void)
     mIC3ClearIntFlag();
     uint16_t bufferData;
     uint16_t diffCapTime;
-    prtLed3Set = ( 1 << bnLed3 );
+   // prtLed3Set = ( 1 << bnLed3 );
     
     while (IC3CON & (1 << 3))
         bufferData = (uint16_t) IC3BUF; 
@@ -513,7 +565,7 @@ void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void)
         OC3RS = 0;
     } */
     
-    prtLed3Clr	= ( 1 << bnLed3 );
+   // prtLed3Clr	= ( 1 << bnLed3 );
 }
 
 /* ------------------------------------------------------------ */
@@ -555,6 +607,7 @@ int main(void) {
 
     
 	DeviceInit();
+    BluetoothInit();
 	AppInit();
     AdcInit();
     InitLeds(); // checkpoint
@@ -563,7 +616,6 @@ int main(void) {
     PID_init(&leftWheel,  1, 0.75,0.075);//,0,10000); // 0.75 0.075
     
     PID_init(&rightWheel, 1, 0.75,0.075);//,0,10000);
-    
     
 	//INTDisableInterrupts();
 	DelayMs(500);
@@ -621,12 +673,13 @@ int main(void) {
         SpiPutBuff(ADC0out, strlen(ADC0out));
         DelayMs(4);
         SpiPutBuff(szCursorPos, 6);
-        DelayMs(4);
-        sprintf(ADC2out,"2=%i :%.1f %.1f",mode, lwSpeed, rwSpeed);
+        DelayMs(4);     
+      //  //sprintf(ADC2out,"2=%i :%.1f %.1f", mode, lwSpeed, rwSpeed);       // "2" was sensor 2 readings, but replaced for mode.
+        sprintf(strout, "m=%i : c=%c", mode, funtime);
         //sprintf(ADC2out, "A2=%.2f",ADCValue2);
-        SpiPutBuff(ADC2out, strlen(ADC2out));
+      // // SpiPutBuff(ADC2out, strlen(ADC2out));
         //sprintf(strout, "d=%.3f c=%.3f", LW_speed, lwSpeed);//, RW_avg_meas); Cur=%.1f"
-        //SpiPutBuff(strout, strlen(strout));
+        SpiPutBuff(strout, strlen(strout));
         DelayMs(250);
         SpiDisable();
 	
@@ -647,11 +700,11 @@ int main(void) {
 		INTEnableInterrupts();
 		//configure OCR to go forward
         
-        if (stBtn1 == stPressed){
-            if (mode == 0) // run wall following mode
-                mode = 1;
-            else if (mode == 1)   // run puppy dog mode
-                mode = 0;
+        if (stBtn1 == stPressed){ // place this in interrupt next 
+          if (mode == 0) // run wall following mode
+              mode = 1;
+          else if (mode == 1)   // run puppy dog mode
+              mode = 0;
         }
 /*      
 		if(stPressed == stPmodBtn1){
@@ -881,6 +934,26 @@ int main(void) {
 **		Initializes on chip peripheral devices to the default
 **		state.
 */
+void BluetoothInit(){
+
+    TRISFCLR = (1<<13) | (1<<5); // settings pins 2,4,8
+    TRISDCLR = (1<<0);
+    PORTDSET = (1<<0);
+    
+    U2STASET = (1<<12);
+    
+    U2BRG = (PBCLK/(4*BaudRate))-1;
+    U2MODESET = (1<<15) | (1<<8)|(1<<3);
+    
+    IFS1CLR = (1<<9);
+    IEC1SET = (1<<9);
+    
+    IPC8SET =(1<<4)|(1<<1);
+    
+    TRISDCLR = (1<<14);
+    PORTDSET = (1<<14);
+    
+}
 
 void DeviceInit() {
 

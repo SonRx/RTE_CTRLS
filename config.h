@@ -83,6 +83,42 @@
 #define	prtBtn2Clr			PORTACLR
 #define	bnBtn2				7
 
+/* BLUETOOTH CONFIGURATION*/ 
+/*JH 1-4 pins 
+*/
+
+#define	trisJH1			TRISF
+#define	trisJH1Set		TRISFSET
+#define	trisJH1Clr		TRISFCLR
+#define	prtJH1			PORTF
+#define	prtJH1Set		PORTFSET
+#define	prtJH1Clr		PORTFCLR
+#define	bnJH1			12  // clear to send -- I can start sending
+
+#define	trisJH2			TRISF
+#define	trisJH2Set		TRISFSET
+#define	trisJH2Clr		TRISFCLR
+#define	prtJH2			PORTF
+#define	prtJH2Set		PORTFSET
+#define	prtJH2Clr		PORTFCLR
+#define	bnJH2			13  // Ready to send -- can i send data
+
+#define	trisJH3			TRISF
+#define	trisJH3Set		TRISFSET
+#define	trisJH3Clr		TRISFCLR
+#define	prtJH3			PORTF
+#define	prtJH3Set		PORTFSET
+#define	prtJH3Clr		PORTFCLR
+#define	bnJH3			4   // receive 
+
+#define	trisJH4			TRISF
+#define	trisJH4Set		TRISFSET
+#define	trisJH4Clr		TRISFCLR
+#define	prtJH4			PORTF
+#define	prtJH4Set		PORTFSET
+#define	prtJH4Clr		PORTFCLR
+#define	bnJH4			5   // transmit
+/* BLUETOOTH CONFIGURATION*/
 
 /*JE 1-4 pins (PmodBTN)
 */
