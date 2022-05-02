@@ -430,33 +430,34 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
     //prtLed1Clr	= ( 1 << bnLed1 );
    
     // funtime already initialized
-    
-    switch (funtime){
-        case 'I' :
-            printf("Moving Forward\n" );
-            MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
-			UpdateMotors();  
-			DelayMs(50);
-			MtrCtrlBwdRight();
-			UpdateMotors();
-			DelayMs(50);
-			MtrCtrlStop();
-			UpdateMotors();
-            break;
-        case 'K' :
-            printf("Moving Backwards\n" );
-            MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
-			UpdateMotors(); 
-			DelayMs(50);
-			MtrCtrlFwdRight();
-			UpdateMotors();
-			DelayMs(50);
-			MtrCtrlStop();
-			UpdateMotors();
-            break;
-        default :
-            MtrCtrlStop();
-            UpdateMotors();
+    if (mode == 2){
+        switch (funtime){
+            case 'I' :
+                printf("Moving Forward\n" );
+                MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
+                UpdateMotors();  
+                DelayMs(50);
+                MtrCtrlBwdRight();
+                UpdateMotors();
+                DelayMs(50);
+                MtrCtrlStop();
+                UpdateMotors();
+                break;
+            case 'K' :
+                printf("Moving Backwards\n" );
+                MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
+                UpdateMotors(); 
+                DelayMs(50);
+                MtrCtrlFwdRight();
+                UpdateMotors();
+                DelayMs(50);
+                MtrCtrlStop();
+                UpdateMotors();
+                break;
+            default :
+                MtrCtrlStop();
+                UpdateMotors();
+        }
     }
     
 }
