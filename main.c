@@ -137,9 +137,9 @@ uint16_t diffCapArr2[MAX];
 
 uint16_t fullRotation = 0;
 
-
-uint16_t RW_time = 6000;    //desired right wheel pulse time (us)
-uint16_t LW_time = 6000;    //desired left wheel pulse time (us)
+#define desiredSpeed 5000
+uint16_t RW_time = desiredSpeed;    //desired right wheel pulse time (us)
+uint16_t LW_time = desiredSpeed;    //desired left wheel pulse time (us)
 
 float RW_speed; //= 0.00480769231/(RW_time * 0.000001);
 float LW_speed; //= 0.00480769231/(LW_time * 0.000001);
@@ -159,9 +159,14 @@ int sit2 = 0;
 int sit3 = 0;
 int sit4 = 0;
 
-uint8_t mode = 0;
+uint8_t mode = 2;
 
 char funtime = 's';
+int movementL = 0;
+int movementR = 0;
+
+BYTE	stBtn1;
+BYTE	stBtn2;
 // oa od
 //////////////
 /* ------------------------------------------------------------ */
@@ -199,11 +204,10 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
     ADCValue0 = (float)ADC1BUF0*3.3/1023.0; // Reading AN0(zero), pin 1 of connector JJ -- servo sensor (center)
     ADCValue1 = (float)ADC1BUF1*3.3/1023.0;
     ADCValue2 = (float)ADC1BUF2*3.3/1023.0;
-    
+     
     // wall following mode
     if (mode == 0) {
-        
-        // rest motors to go forward after transition from mode 1(puppy dog).
+         // rest motors to go forward after transition from mode 1(puppy dog).
         dirMtrLeft	= dirMtrLeftBwd;
 		dirMtrRight	= dirMtrRightBwd;
         
@@ -272,7 +276,6 @@ void __ISR(_ADC_VECTOR, ipl3) _ADC_HANDLER(void)
            UpdateMotors(); 
         }
     }
-     
     //prtLed4Clr	= ( 1 << bnLed4 );
 }
 
@@ -297,16 +300,11 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
 {
 	static	WORD tusLeds = 0;
     static  HWORD TMR5_Counter = 0;
-    
+
 	mT5ClearIntFlag();
 	//prtLed1Set = ( 1 << bnLed1 );
-   
-    // 
+    
     if (TMR5_Counter == cntr_ms_interval){
-       // do pid cntrl
-       // setpoint -> desired pulse time ; input -> avg pulse time from input cap.
-       // void PID_error(uint16_t wheel,uint16_t SetPoint, uint16_t input) // 0 for left wheel; 1 for right wheel;
-
       PID_control(&leftWheel,0,LW_time,LW_avg_meas);
       PID_control(&rightWheel,1,RW_time,RW_avg_meas);
     }
@@ -315,7 +313,13 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
         TMR5_Counter = 0;
     }
     
-
+    if (stBtn1 == stPressed && stBtn2 == stPressed)
+          mode = 2; // run BlueTooth control mode
+      else if (stBtn1 == stPressed)
+          mode = 0; // run wall following mode
+      else if (stBtn2 == stPressed)
+          mode = 1; // run puppy dog mode
+         
 	// Read the raw state of the button pins.
 	btnBtn1.stCur = ( prtBtn1 & ( 1 << bnBtn1 ) ) ? stPressed : stReleased;
 	btnBtn2.stCur = ( prtBtn2 & ( 1 << bnBtn2 ) ) ? stPressed : stReleased;
@@ -427,40 +431,14 @@ void __ISR(_TIMER_5_VECTOR, ipl7) Timer5Handler(void)
 		PmodSwt4.stBtn = PmodSwt4.stCur;
 		PmodSwt4.cst = 0;
 	}
-    //prtLed1Clr	= ( 1 << bnLed1 );
-   
-    // funtime already initialized
-    if (mode == 2){
-        switch (funtime){
-            case 'I' :
-                printf("Moving Forward\n" );
-                MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
-                UpdateMotors();  
-                DelayMs(50);
-                MtrCtrlBwdRight();
-                UpdateMotors();
-                DelayMs(50);
-                MtrCtrlStop();
-                UpdateMotors();
-                break;
-            case 'K' :
-                printf("Moving Backwards\n" );
-                MtrCtrlStop();  //stop before sending new data to avoid possible short circuit
-                UpdateMotors(); 
-                DelayMs(50);
-                MtrCtrlFwdRight();
-                UpdateMotors();
-                DelayMs(50);
-                MtrCtrlStop();
-                UpdateMotors();
-                break;
-            default :
-                MtrCtrlStop();
-                UpdateMotors();
-        }
-    }
+    //prtLed1Clr	= ( 1 << bnLed1 );   
+}
+
+void __ISR(_TIMER_4_VECTOR, ipl6) Timer4Handler(void)
+{
     
 }
+
 
 void __ISR(_INPUT_CAPTURE_2_VECTOR, ipl5) _IC2_IntHandler(void) // change to 5
 {
@@ -593,8 +571,8 @@ void __ISR(_INPUT_CAPTURE_3_VECTOR, ipl5) _IC3_IntHandler(void)
 
 int main(void) {
 
-	BYTE	stBtn1;
-	BYTE	stBtn2;
+	//BYTE	stBtn1;
+	//BYTE	stBtn2;
 
 	BYTE	stPmodBtn1;
 	BYTE	stPmodBtn2;
@@ -641,9 +619,6 @@ int main(void) {
 	INTEnableInterrupts();
     char strout[100];
     char strout2[100];
-    char ADC0out[100];
-    char ADC1out [100];
-    char ADC2out[100];
    
     OC2R = 5000; // right wheel
     OC2RS = 5000;
@@ -663,25 +638,33 @@ int main(void) {
         DelayMs(4);
         SpiPutBuff(szCursorOff, 4);
         DelayMs(4);
-//        sprintf(strout, "spd=%.1f ft/s", speed);
-//        SpiPutBuff(strout, strlen(strout));
+
+        if (mode == 0 || mode == 1){
+            // top line
+            sprintf(strout, "0=%.2f 1=%.2f", ADCValue0, ADCValue1);
+            SpiPutBuff(strout, strlen(strout));
+            DelayMs(4);
+            SpiPutBuff(szCursorPos, 6);
+            DelayMs(4); 
+            // bottom line
+            sprintf(strout2,"2=%i :%.1f %.1f", mode, lwSpeed, rwSpeed);
+            SpiPutBuff(strout2, strlen(strout2));
+            DelayMs(250);
+        }
         
-//        sprintf(strout2, "D=%.3f C=%.3f", RW_speed, rwSpeed);//, RW_avg_meas); Cur=%.1f"
-//        SpiPutBuff(strout2, strlen(strout2));
+        if (mode == 2){
+            // top line
+            sprintf(strout,"L=%.1f R=%.1f",lwSpeed, rwSpeed);
+            SpiPutBuff(strout, strlen(strout));
+            DelayMs(4);
+            SpiPutBuff(szCursorPos, 6);
+            DelayMs(4); 
+            // bottom line
+            sprintf(strout2, "m=%i : c=%c", mode, funtime);
+            SpiPutBuff(strout2, strlen(strout2));
+            DelayMs(250);
+        }
         
-        sprintf(ADC0out, "0=%.2f 1=%.2f", ADCValue0, ADCValue1);
-        //sprintf(ADC0out, "A0=%.2f", ADCValue0);
-        SpiPutBuff(ADC0out, strlen(ADC0out));
-        DelayMs(4);
-        SpiPutBuff(szCursorPos, 6);
-        DelayMs(4);     
-      //  //sprintf(ADC2out,"2=%i :%.1f %.1f", mode, lwSpeed, rwSpeed);       // "2" was sensor 2 readings, but replaced for mode.
-        sprintf(strout, "m=%i : c=%c", mode, funtime);
-        //sprintf(ADC2out, "A2=%.2f",ADCValue2);
-      // // SpiPutBuff(ADC2out, strlen(ADC2out));
-        //sprintf(strout, "d=%.3f c=%.3f", LW_speed, lwSpeed);//, RW_avg_meas); Cur=%.1f"
-        SpiPutBuff(strout, strlen(strout));
-        DelayMs(250);
         SpiDisable();
 	
 		//get data here
@@ -701,12 +684,86 @@ int main(void) {
 		INTEnableInterrupts();
 		//configure OCR to go forward
         
-        if (stBtn1 == stPressed){ // place this in interrupt next 
-          if (mode == 0) // run wall following mode
-              mode = 1;
-          else if (mode == 1)   // run puppy dog mode
-              mode = 0;
+        if (mode == 2){
+        switch (funtime){
+            case 'i' : // forward
+                LW_time = desiredSpeed; 
+                RW_time = desiredSpeed;
+                dirMtrLeft			= dirMtrLeftBwd;
+                dirMtrRight			= dirMtrRightBwd;    
+                UpdateMotors();
+   
+                LW_avg_meas = LW_time;
+                RW_avg_meas = RW_time;
+                UpdateMotors();
+                break;
+                
+            case 'k' : // backward
+                LW_time = desiredSpeed; 
+                RW_time = desiredSpeed;
+                dirMtrLeft			= dirMtrLeftFwd;
+                dirMtrRight			= dirMtrRightFwd;    
+                UpdateMotors();
+   
+                LW_avg_meas = LW_time;
+                RW_avg_meas = RW_time;
+                UpdateMotors();   
+                break;
+                
+            case 'l' : //turn right
+                LW_time = 2500; 
+                RW_time = 9250;
+                dirMtrLeft			= dirMtrLeftBwd;
+                dirMtrRight			= dirMtrRightBwd;         
+                UpdateMotors();
+   
+                LW_avg_meas = LW_time - 2500; // 
+                RW_avg_meas = RW_time + 4250; //
+                
+                movementL++;
+                if (movementL >= 18){ // don't want to take a left too much.
+                    funtime = 's';
+                    movementR = 0;
+                }
+                
+                UpdateMotors();             
+                break;
+                
+            case 'j' : //turn left
+                LW_time = 9250; 
+                RW_time = 2500;
+                dirMtrLeft			= dirMtrLeftBwd;
+                dirMtrRight			= dirMtrRightBwd;
+                
+                UpdateMotors();
+
+                LW_avg_meas = LW_time + 4250; // 
+                RW_avg_meas = RW_time - 2500; //
+
+                movementR++;
+                if (movementR >= 18){ // don't want to take a right too much.
+                    funtime = 's';
+                    movementL = 0;
+                }
+               
+                UpdateMotors();
+                break;
+                
+            case 's': // default stand still
+                LW_time = 9999; // maybe to 9500
+                RW_time = 9999;
+                dirMtrLeft			= dirMtrLeftBwd;
+                dirMtrRight			= dirMtrRightBwd;    
+                UpdateMotors();
+                
+                LW_avg_meas = 9999;
+                RW_avg_meas = 9999;
+                
+                UpdateMotors();
+                break;            
         }
+    }
+                  
 /*      
 		if(stPressed == stPmodBtn1){
 			//start motor if button 2 pressed
@@ -1018,6 +1075,16 @@ void DeviceInit() {
 	
 	// Start timers.
 	T5CON = ( 1 << 15 ) | ( 1 << 5 ) | ( 1 << 4 ); // fTimer5 = fPb / 8
+    
+//    // Configure Timer 4.
+//	TMR4	= 0;
+//	PR4		= 950// period match every 1000 us , was 99 -> 100 us // 9999-> 10ms
+//	IPC4SET	= ( 1 << 4 ) | ( 1 << 3 ) | ( 1 << 2 ) | ( 1 << 1 ) | ( 1 << 0); // interrupt priority level 7, sub 3
+//	IFS0CLR = ( 1 << 20);
+//	IEC0SET	= ( 1 << 20);
+//	
+//	// Start timers.
+//	T4CON = ( 1 << 15) | ( 1 << 5) | ( 1 << 4); // fTimer4 = fPb / 8
        
 	//enable SPI
 	SpiInit();
